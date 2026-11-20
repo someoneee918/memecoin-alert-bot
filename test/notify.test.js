@@ -89,3 +89,22 @@ test("the plain-text version for --dry-run has no Discord escapes or markup", ()
   const g = formatAlert({ type: "migration", mint: "M", name: "", symbol: "", check: null });
   assert.equal(g.text, "🎓 Graduated: M\nM");
 });
+
+test("Telegram and Discord 4xx errors fail immediately without retry", async () => {
+  let requestCount = 0;
+  const server = createServer((req, res) => {
+    requestCount++;
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error_code: 400, description: "Bad Request: chat not found" }));
+  });
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  process.env.TELEGRAM_API_BASE = base;
+  const { createNotifier } = await import(`../lib/notify.js?fresh=${Date.now()}`);
+  const n = createNotifier({ telegramToken: "T", telegramChat: "invalid_chat", gapMs: 1 });
+  n.send(formatAlert(launch));
+  await n.idle();
+  server.close();
+  assert.equal(requestCount, 1);
+  assert.equal(n.stats().failed, 1);
+});
